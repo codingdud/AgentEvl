@@ -12,6 +12,7 @@ Run:
   uv run python -m harness.runner --id my-scenario-id
   uv run python -m harness.runner --list
   uv run python -m harness.runner --no-save
+  uv run python -m harness.runner --scenario-dir custom/path
 """
 
 from __future__ import annotations
@@ -157,14 +158,14 @@ def call_llm(system: str, user: str, cfg: dict, model_override: str | None = Non
     return ""
 
 
-# ── .github/ discovery ────────────────────────────────────────────────────────
+# ── .github/ discovery ──────────────────────────────────────────────────────
 
 def list_github_files() -> dict[str, list[Path]]:
     result: dict[str, list[Path]] = {"agents": [], "skills": [], "prompts": []}
     for key in result:
         d = GITHUB_DIR / key
         if d.exists():
-            result[key] = sorted(d.rglob("*.md")) + sorted(d.rglob("*.yaml"))
+            result[key] = sorted(d.rglob("*.md")) + sorted(d.rglob("*.yaml")) + sorted(d.rglob("*.yml"))
     return result
 
 
@@ -179,24 +180,36 @@ def resolve_system(raw: str) -> str:
     return raw
 
 
-# ── Scenario loading ──────────────────────────────────────────────────────────
+# ── Scenario loading ────────────────────────────────────────────────────────
 
-def load_scenarios(category: str | None = None, scenario_id: str | None = None) -> list[dict]:
+def load_scenarios(
+    scenario_dir: Path,
+    category: str | None = None,
+    scenario_id: str | None = None,
+) -> list[dict]:
+    """Load scenarios from scenario_dir (supports .yaml and .yml files)."""
     scenarios: list[dict] = []
-    glob = "**/*.yaml" if not category else f"{category}/*.yaml"
-    for path in sorted(SCENARIOS_DIR.glob(glob)):
-        with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        if isinstance(data, list):
-            scenarios.extend(data)
-        else:
-            scenarios.append(data)
+    if category:
+        glob_patterns = [f"{category}/*.yaml", f"{category}/*.yml"]
+    else:
+        glob_patterns = ["**/*.yaml", "**/*.yml"]
+    
+    for pattern in glob_patterns:
+        for path in sorted(scenario_dir.glob(pattern)):
+            with open(path, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            if isinstance(data, list):
+                scenarios.extend(data)
+            else:
+                scenarios.append(data)
+    
     if scenario_id:
         scenarios = [s for s in scenarios if s.get("id") == scenario_id]
+    
     return scenarios
 
 
-# ── Checks ────────────────────────────────────────────────────────────────────
+# ── Checks ──────────────────────────────────────────────────────────────────
 
 def _check_contains(output: str, value: str) -> tuple[bool, str]:
     return value.lower() in output.lower(), f"contains '{value}'"
@@ -235,7 +248,7 @@ def run_checks(output: str, checks: list[dict], cfg: dict) -> list[dict]:
     return results
 
 
-# ── Runner ────────────────────────────────────────────────────────────────────
+# ── Runner ──────────────────────────────────────────────────────────────────
 
 def run_scenario(scenario: dict, cfg: dict) -> dict[str, Any]:
     system = resolve_system(scenario.get("system", "You are a helpful assistant."))
@@ -264,12 +277,14 @@ def run_scenario(scenario: dict, cfg: dict) -> dict[str, Any]:
     }
 
 
-# ── CLI ───────────────────────────────────────────────────────────────────────
+# ── CLI ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Agent/Skill/MCP/Prompt test harness")
     parser.add_argument("--category", help="agents | skills | mcps | prompts")
     parser.add_argument("--id", dest="scenario_id", help="Run a single scenario by id")
+    parser.add_argument("--scenario-dir", type=Path, default=SCENARIOS_DIR,
+                        help="Path to scenarios directory (default: promtEvl/scenarios)")
     parser.add_argument("--no-save", action="store_true", help="Skip writing results JSON")
     parser.add_argument("--list", action="store_true", help="List discovered .github/ files and exit")
     args = parser.parse_args()
@@ -288,7 +303,11 @@ def main() -> None:
     cfg = _provider_cfg()
     console.print(f"\n[bold]Provider:[/bold] {cfg['name']}  [bold]Model:[/bold] {cfg['model']}\n")
 
-    scenarios = load_scenarios(category=args.category, scenario_id=args.scenario_id)
+    scenarios = load_scenarios(
+        scenario_dir=args.scenario_dir,
+        category=args.category,
+        scenario_id=args.scenario_id,
+    )
     if not scenarios:
         console.print("[yellow]No scenarios found.[/yellow]")
         return
