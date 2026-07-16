@@ -15,6 +15,8 @@ Run:
   uv run python -m harness.optimizer --scenario-id <id>
   uv run python -m harness.optimizer --scenario-id <id> --optimize
   uv run python -m harness.optimizer --scenario-id <id> --optimize --optimizer bootstrap
+  uv run python -m harness.optimizer --list-scenarios
+  uv run python -m harness.optimizer --list-scenarios --scenario-dir custom/path
 
 Provider selection (set in .env):
   PROVIDER=openrouter  →  OPENROUTER_API_KEY  →  openrouter/anthropic/claude-3-5-haiku
@@ -47,7 +49,7 @@ RESULTS_DIR.mkdir(exist_ok=True)
 
 console = Console()
 
-# ── Provider table ────────────────────────────────────────────────────────────
+# ── Provider table ─────────────────────────────────────────────────────────
 # model strings are litellm slugs — dspy.LM passes them straight to litellm
 PROVIDERS: dict[str, dict[str, str | None]] = {
     "openrouter": {
@@ -92,7 +94,7 @@ def _provider_cfg() -> dict[str, Any]:
     return cfg
 
 
-# ── DSPy LM setup ─────────────────────────────────────────────────────────────
+# ── DSPy LM setup ──────────────────────────────────────────────────────────
 
 def configure_dspy(cfg: dict) -> dspy.LM:
     kwargs: dict[str, Any] = {"api_key": cfg["api_key"]}
@@ -105,7 +107,7 @@ def configure_dspy(cfg: dict) -> dspy.LM:
     return lm
 
 
-# ── openevals judge ───────────────────────────────────────────────────────────
+# ── openevals judge ────────────────────────────────────────────────────────
 # create_llm_as_judge returns a SimpleEvaluator callable.
 # Calling it: judge(inputs=..., outputs=...) → EvaluatorResult TypedDict
 #   EvaluatorResult = {"key": str, "score": float|bool, "comment": str|None, ...}
@@ -169,8 +171,37 @@ def resolve_system(raw: str) -> tuple[str, Path | None]:
     return raw, None
 
 
-def load_scenario(scenario_id: str) -> dict:
-    for path in sorted((ROOT / "scenarios").glob("**/*.yaml")):
+def list_scenario_ids(scenario_dir: Path) -> None:
+    """List all scenario IDs found in scenario_dir."""
+    if not scenario_dir.exists():
+        console.print(f"[red]Scenario directory not found: {scenario_dir}[/red]")
+        sys.exit(1)
+    
+    scenarios_by_file: dict[str, list[str]] = {}
+    for path in sorted(scenario_dir.glob("**/*.yaml")) + sorted(scenario_dir.glob("**/*.yml")):
+        with open(path, encoding="utf-8") as f:
+            items = yaml.safe_load(f)
+        if not isinstance(items, list):
+            items = [items]
+        ids = [item.get("id") for item in items if item.get("id")]
+        if ids:
+            scenarios_by_file[str(path.relative_to(ROOT))] = ids
+    
+    if not scenarios_by_file:
+        console.print(f"[yellow]No scenarios found in {scenario_dir}[/yellow]")
+        return
+    
+    console.print(f"\n[bold]Scenarios in {scenario_dir}:[/bold]\n")
+    for file_path, ids in scenarios_by_file.items():
+        console.print(f"  [cyan]{file_path}[/cyan]")
+        for sid in ids:
+            console.print(f"    • {sid}")
+    console.print()
+
+
+def load_scenario(scenario_id: str, scenario_dir: Path) -> dict:
+    """Load scenario by ID from scenario_dir (supports .yaml and .yml)."""
+    for path in sorted(scenario_dir.glob("**/*.yaml")) + sorted(scenario_dir.glob("**/*.yml")):
         with open(path, encoding="utf-8") as f:
             items = yaml.safe_load(f)
         if not isinstance(items, list):
@@ -178,7 +209,7 @@ def load_scenario(scenario_id: str) -> dict:
         for item in items:
             if item.get("id") == scenario_id:
                 return item
-    console.print(f"[red]Scenario '{scenario_id}' not found.[/red]")
+    console.print(f"[red]Scenario '{scenario_id}' not found in {scenario_dir}[/red]")
     sys.exit(1)
 
 
@@ -191,7 +222,7 @@ def make_program(instructions: str) -> dspy.Predict:
     return dspy.Predict(sig)
 
 
-# ── devset ────────────────────────────────────────────────────────────────────
+# ── devset ──────────────────────────────────────────────────────────────────
 
 def build_devset(scenario: dict) -> list[dspy.Example]:
     """
@@ -205,7 +236,7 @@ def build_devset(scenario: dict) -> list[dspy.Example]:
     ]
 
 
-# ── metric ────────────────────────────────────────────────────────────────────
+# ── metric ──────────────────────────────────────────────────────────────────
 # DSPy metric signature: metric(example, pred, trace=None) → float | bool
 # pred.response is the output field name from our signature.
 # judge(inputs=..., outputs=...) → EvaluatorResult {"key":..., "score": float, ...}
@@ -224,7 +255,7 @@ def build_metric(judge: Callable, system_text: str) -> Callable:
     return metric
 
 
-# ── evaluate ──────────────────────────────────────────────────────────────────
+# ── evaluate ────────────────────────────────────────────────────────────────
 
 def run_evaluate(program: dspy.Module, devset: list, metric: Callable) -> float:
     # num_threads=1 avoids rate-limit bursts on small devsets
@@ -238,7 +269,7 @@ def run_evaluate(program: dspy.Module, devset: list, metric: Callable) -> float:
     return float(evaluator(program))
 
 
-# ── optimize ──────────────────────────────────────────────────────────────────
+# ── optimize ────────────────────────────────────────────────────────────────
 
 def run_optimize(
     program: dspy.Module,
@@ -263,7 +294,7 @@ def run_optimize(
     return opt.compile(program, trainset=devset)
 
 
-# ── save ──────────────────────────────────────────────────────────────────────
+# ── save ────────────────────────────────────────────────────────────────────
 
 def save_results(
     optimized: dspy.Module,
@@ -292,17 +323,30 @@ def save_results(
     return instructions
 
 
-# ── CLI ───────────────────────────────────────────────────────────────────────
+# ── CLI ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="DSPy + openevals prompt optimizer")
-    parser.add_argument("--scenario-id", required=True)
+    parser.add_argument("--scenario-id", help="Run optimization for this scenario ID")
+    parser.add_argument("--scenario-dir", type=Path, default=ROOT / "scenarios",
+                        help="Path to scenarios directory (default: promtEvl/scenarios)")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="List all available scenario IDs and exit")
     parser.add_argument("--optimize", action="store_true",
                         help="Run optimizer after baseline eval")
     parser.add_argument("--optimizer", choices=["mipro", "bootstrap"], default="mipro",
                         help="mipro=MIPROv2 (rewrites instructions)  "
                              "bootstrap=BootstrapFewShotWithRandomSearch (adds examples)")
     args = parser.parse_args()
+
+    # List scenarios and exit
+    if args.list_scenarios:
+        list_scenario_ids(args.scenario_dir)
+        return
+
+    # Require --scenario-id if not listing
+    if not args.scenario_id:
+        parser.error("--scenario-id is required (or use --list-scenarios to see available IDs)")
 
     cfg = _provider_cfg()
     console.print(
@@ -312,7 +356,7 @@ def main() -> None:
 
     configure_dspy(cfg)
 
-    scenario = load_scenario(args.scenario_id)
+    scenario = load_scenario(args.scenario_id, args.scenario_dir)
     system_text, source_path = resolve_system(scenario.get("system", ""))
     devset = build_devset(scenario)
     rubric = build_rubric(scenario.get("checks", []))
