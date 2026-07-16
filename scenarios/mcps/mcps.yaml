@@ -1,0 +1,69 @@
+# scenarios/mcps/mcps.yaml
+# MCP tests validate that an agent correctly uses / describes MCP tool calls.
+# Since we can't actually invoke MCP servers in this harness, we test the
+# agent's *intent* — does it correctly identify which MCP to call and with
+# what arguments?
+
+- id: mcp-corsair-invocation-intent
+  category: mcps
+  target: "claudecode / corsair MCP"
+  description: "Agent should identify corsair MCP as the tool to call for its declared purpose"
+  system: |
+    You are an agent with access to one MCP server called "corsair" (installed via
+    `npx @corsair-dev/mcp`). Describe which tool you would call and with what
+    arguments to complete the user's request. Do not execute — just describe the call.
+  user: "I need to use the corsair MCP to complete a task. What tool would you invoke?"
+  checks:
+    - type: contains
+      value: "corsair"
+    - type: llm_judge
+      value: "The response describes a concrete MCP tool invocation (tool name + arguments) rather than refusing or giving a generic answer."
+
+- id: mcp-tavily-search-call
+  category: mcps
+  target: "kavya / tavily MCP"
+  description: "Agent should call tavily search with a query string for research tasks"
+  system: |
+    You are a research agent. You have access to a Tavily MCP server (transport: stdio,
+    command: npx tavily-mcp). For research tasks, describe the exact tool call you would
+    make. Do not execute — describe the call in JSON format.
+  user: "Research the latest sustainable fashion trends for an Instagram post."
+  checks:
+    - type: contains
+      value: "tavily"
+    - type: llm_judge
+      value: "The response shows a JSON tool call to the tavily MCP with a meaningful search query about sustainable fashion."
+
+- id: mcp-firecrawl-scrape-call
+  category: mcps
+  target: "kavya / firecrawl MCP"
+  description: "Agent should call firecrawl to scrape a URL when given a web source"
+  system: |
+    You are a research agent. You have access to a Firecrawl MCP server (transport: stdio,
+    command: npx firecrawl-mcp). For web scraping tasks, describe the exact tool call.
+    Do not execute — describe the call in JSON format.
+  user: "Scrape the content from https://example.com/sustainable-fashion-guide"
+  checks:
+    - type: contains
+      value: "firecrawl"
+    - type: llm_judge
+      value: "The response shows a JSON tool call to the firecrawl MCP with the correct URL as the argument."
+
+- id: mcp-env-var-not-hardcoded
+  category: mcps
+  target: "kavya / MCP config security"
+  description: "MCP configs must use env var references, not hardcoded API keys"
+  system: |
+    You are a security reviewer. Check whether the following MCP config correctly
+    uses environment variable references instead of hardcoded secrets.
+  user: |
+    MCP config:
+    {
+      "tavily": { "env": { "TAVILY_API_KEY": "${TAVILY_API_KEY}" } },
+      "firecrawl": { "env": { "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}" } }
+    }
+  checks:
+    - type: llm_judge
+      value: "The response confirms that both API keys use environment variable references (${...} syntax) and no secrets are hardcoded."
+    - type: not_contains
+      value: "hardcoded"

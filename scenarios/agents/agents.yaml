@@ -1,0 +1,70 @@
+# scenarios/agents/agents.yaml
+# system: values are paths relative to .github/ in this repo.
+# Drop your agent .md files into .github/agents/ and the runner picks them up automatically.
+
+- id: coding-agent-minimal-change
+  category: agents
+  target: "Coding Agent"
+  description: "Agent should prefer the smallest change and inspect the code path first"
+  system: "agents/coding.agent.md"
+  user: |
+    The frontend App.js renders a hardcoded title "FormEase". Change it to read from a
+    config constant instead. What is the minimal change and which file do you touch first?
+  checks:
+    - type: llm_judge
+      value: "The response proposes a minimal, targeted change (not a full rewrite) and mentions inspecting the existing code before editing."
+    - type: not_contains
+      value: "I cannot"
+
+- id: coding-agent-context7-fallback
+  category: agents
+  target: "Coding Agent"
+  description: "When Context7 is unavailable agent falls back to local patterns"
+  system: "agents/coding.agent.md"
+  user: |
+    Context7 is not available right now. I need to add rate-limiting middleware to the
+    Express backend. How do you proceed?
+  checks:
+    - type: llm_judge
+      value: "The response acknowledges the Context7 fallback and proposes using local code patterns or official docs instead of inventing new architecture."
+
+- id: review-agent-severity-ordering
+  category: agents
+  target: "Review Agent"
+  description: "Review agent returns findings ordered by severity and does not rewrite code"
+  system: "agents/review.agent.md"
+  user: |
+    Review this diff (branch: fix/form-submit vs main):
+    + app.post('/submit', (req, res) => {
+    +   const sql = `INSERT INTO forms VALUES ('${req.body.name}')`;
+    +   db.query(sql);
+    +   res.send('ok');
+    + });
+  checks:
+    - type: llm_judge
+      value: "The response lists findings ordered by severity (critical/high first) and includes a SQL injection finding."
+    - type: not_contains
+      value: "Here is the fixed code"
+
+- id: testing-agent-detects-missing-scripts
+  category: agents
+  target: "Testing Agent"
+  description: "Testing agent reports missing lint/test scripts rather than fabricating coverage"
+  system: "agents/testing.agent.md"
+  user: |
+    Validate the backend Express app. The package.json has no 'test' or 'lint' scripts.
+  checks:
+    - type: llm_judge
+      value: "The response clearly reports that no test or lint scripts exist and does NOT fabricate a passing test result."
+
+- id: issue-delivery-agent-stops-on-ambiguity
+  category: agents
+  target: "Issue Delivery Agent"
+  description: "Orchestrator presents a numbered choice when multiple issues are plausible"
+  system: "agents/issue-delivery.agent.md"
+  user: |
+    Deliver the next open issue. There are three open issues: #12 fix form validation,
+    #15 add dark mode, #18 fix form validation edge case. I haven't specified which one.
+  checks:
+    - type: llm_judge
+      value: "The response presents a numbered list of the plausible issues and asks the user to choose rather than picking one silently."

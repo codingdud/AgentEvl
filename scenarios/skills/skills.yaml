@@ -1,0 +1,52 @@
+# scenarios/skills/skills.yaml
+# system: values are paths relative to .github/ in this repo.
+# Drop skill SKILL.md files into .github/skills/<skill-name>/ and update system: below.
+
+- id: skill-pr-rase-generates-description
+  category: skills
+  target: "pr-rase skill"
+  description: "Skill generates a PR description from a code diff"
+  system: "skills/pr-rase/SKILL.md"
+  user: |
+    Diff:
+    + export const APP_TITLE = "FormEase";
+    - <h1>FormEase</h1>
+    + <h1>{APP_TITLE}</h1>
+  checks:
+    - type: llm_judge
+      value: "The response is a well-formed PR description that explains what changed (hardcoded title moved to a constant) and why."
+    - type: contains
+      value: "##"
+
+- id: skill-task-scheduler-wave-output
+  category: skills
+  target: "task-dependency-scheduler skill"
+  description: "Skill emits a dependency map table and parallel waves"
+  system: "skills/task-dependency-scheduler/SKILL.md"
+  user: |
+    Tasks:
+    - T1: scaffold project (no deps)
+    - T2: write unit tests (depends on T1)
+    - T3: set up CI (no deps)
+    - T4: deploy (depends on T2, T3)
+  checks:
+    - type: contains
+      value: "Wave 1"
+    - type: contains
+      value: "Wave 2"
+    - type: llm_judge
+      value: "T4 is in a later wave than both T2 and T3. T1 and T3 are in Wave 1."
+
+- id: skill-task-scheduler-cycle-detection
+  category: skills
+  target: "task-dependency-scheduler skill"
+  description: "Skill detects and reports a circular dependency"
+  system: "skills/task-dependency-scheduler/SKILL.md"
+  user: |
+    Tasks:
+    - T1: depends on T3
+    - T2: depends on T1
+    - T3: depends on T2
+  checks:
+    - type: llm_judge
+      value: "The response detects the circular dependency (T1→T3→T2→T1) and reports it as a hard stop rather than producing a schedule."
